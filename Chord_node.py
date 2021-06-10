@@ -55,7 +55,7 @@ class Chord_Node:
     def join(self,entry_point):
         self.init_finger_table(entry_point)
         self.update_others()
-        
+             
 
     def init_finger_table(self, ip):
         
@@ -75,22 +75,22 @@ class Chord_Node:
                 self.finger[i+1] = (succ_node['id'], succ_node['ip'])
 
     def update_others(self):
-        
         for i in range(1,self.m+1):
+           
             node = self.find_predecessor( (self.id - (2**(i-1))   + 2**self.m ) % 2**self.m   )
             if node['id'] != self.id:
-                self.request_update_finger(node['ip'], i)
+                self.request_update_finger((self.id,self.ip),node['ip'], i)
                 
         
                 
     def update_finger_table(self,n,i):
         node =  self.finger[i]
-        if self.inbetween(n['id'], self.id,True , node[0],False ):
-            self.finger[i] = (n['id'],n ['ip'])
+        if self.inbetween(n[0], self.id,True , node[0],False ):
+            self.finger[i] = n
             pred_node = self.finger[0]
-            if pred_node[0] != n['id']:
-                self.request_update_finger(pred_node[1], i)
-            
+            if pred_node[0] != n[0]:
+                self.request_update_finger(n,pred_node[1], i)
+               
    
     #============End Join node============
 
@@ -113,6 +113,8 @@ class Chord_Node:
     
     def infinit_stabilize(self):
         while True:
+            print("\033c")
+            self.print_me()
             self.stabilize()
             time.sleep(1)
 
@@ -138,15 +140,12 @@ class Chord_Node:
         while(True):
             id = node['id']
             node_succ_id,node_succ_ip = node['fg'][1]
-            
             if self.inbetween(idx, id,False, node_succ_id,True ):
                 return node
             if id == self.id :
                 node = self.closest_preceding_finger(idx)
-                if node['id'] == id:
-                    return node
             else:
-                node = self.request_closest_preceding_finger(node_succ_ip,idx)
+                node = self.request_closest_preceding_finger(node['ip'],idx)
                
 
     def closest_preceding_finger(self,idx):
@@ -176,9 +175,9 @@ class Chord_Node:
         s_req.send_string(Chord_Node.UPDATE_PRED + " " + json.dumps((self.id,self.ip)) )
         s_req.recv_string()
 
-    def request_update_finger(self,ip_port,i):
+    def request_update_finger(self,node,ip_port,i):
         s_req = self.make_req_socket(ip_port)
-        s_req.send_string(Chord_Node.UFT + " " + json.dumps([self.to_json(),i] ) )
+        s_req.send_string(Chord_Node.UFT + " " + json.dumps([node,i] ) )
         s_req.recv_string()
     
     def request_finger_table(self, ip_port):
@@ -211,11 +210,9 @@ class Chord_Node:
 
     def request_update_finger_handler(self, body):
         node, i = json.loads(body)
-        node = json.loads(node)
-        
         self.update_finger_table(node,i)
-       
         self.s_rep.send_string('OK')
+       
 
     def request_finger_table_handler(self, body = None):
         self.s_rep.send_string(json.dumps(self.finger))
@@ -248,6 +245,7 @@ class Chord_Node:
 
         if lwb == upb:
             return True
+
 
         if lwb <= upb:
             return key >= lwb and key <= upb
