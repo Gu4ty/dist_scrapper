@@ -30,6 +30,7 @@ class Chord_Node:
         self.m = m
         #finger[i] = node with id >= id + 2^(i-1)
         self.finger = [(self.id,self.ip) for _ in range(m+1)] #finger[0] = Predecessor
+        self.succesors = [(self.id,self.ip) for _ in range(m)]
         if entry_point:
             self.join(entry_point)
         
@@ -46,14 +47,17 @@ class Chord_Node:
         #------------------------------
 
         self.lock_finger = threading.Lock()
+        self.lock_succesors = threading.Lock()
         threading.Thread(target=self.infinit_fix_fingers, args=()).start()
         threading.Thread(target=self.infinit_stabilize, args=()).start()
+        threading.Thread(target=self.infinit_fix_succesors, args=()).start()
         self.run()
 
 
     #============Join node============
     def join(self,entry_point):
         self.init_finger_table(entry_point)
+        self.succesors = [self.finger[1] for _ in range(self.m)]
         self.update_others()
              
 
@@ -101,6 +105,7 @@ class Chord_Node:
         predeccessor = successor_finger_table[0]
         if self.inbetween(predeccessor[0], self.id,False , self.finger[1][0],False):
             self.finger[1] = predeccessor
+            self.succesors[0]= predeccessor
         self.request_notify(self.finger[1][1])
         self.lock_finger.release()
     
@@ -111,6 +116,15 @@ class Chord_Node:
         self.finger[i] = (node['id'], node['ip'])
         self.lock_finger.release()
     
+    def fix_succesors(self):
+        self.lock_succesors.acquire()
+        self.succesors[0]= self.finger[1]
+        i = random.randint(1,self.m-1)
+        succesor_node = self.succesors[i-1]
+        node = self.find_succesor( succesor_node[0] + 1 )
+        self.succesors[i] = ( node['id'], node['ip'] )
+        self.lock_succesors.release()
+
     def infinit_stabilize(self):
         while True:
             print("\033c")
@@ -121,6 +135,11 @@ class Chord_Node:
     def infinit_fix_fingers(self):
         while True:
             self.fix_fingers()
+            time.sleep(1)
+    
+    def infinit_fix_succesors(self):
+        while True:
+            self.fix_succesors()
             time.sleep(1)
             
     #============End Stabilization============
@@ -234,6 +253,7 @@ class Chord_Node:
         print("Predecessor: ", self.finger[0])
         for i in range(1, self.m + 1):
             print(f'Finger[{i}]= (node id: {self.finger[i][0]} , node ip: {self.finger[i][1]} )')
+        print("Successors list: ", self.succesors)
 
     def inbetween(self,key, lwb, lequal, upb, requal):
         
