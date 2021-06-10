@@ -4,6 +4,7 @@ import time
 import json
 import random
 import threading
+import select
 
 def split_ip(ip):
     return ip.split(':')
@@ -178,37 +179,42 @@ class Chord_Node:
     #============Send Requests============
     
     def request_successor(self, ip_port, idx):
-        s_req = self.make_req_socket(ip_port)
-        s_req.send_string(Chord_Node.FS + " " + str(idx))
-        return json.loads(s_req.recv_string())
-
+        response = self.send_request(ip_port, Chord_Node.FS, str(idx))
+        if response:
+            return json.loads(response)
+        return None
+    
     def request_closest_preceding_finger(self, ip_port,idx):
-        s_req = self.make_req_socket(ip_port)
-        s_req.send_string(Chord_Node.CPF + " " + str(idx))
-        n_node = s_req.recv_string()
-        node = json.loads(n_node)
-        return node
+        response = self.send_request(ip_port, Chord_Node.CPF, str(idx))
+        if response:
+            node = json.loads(response)
+            return node
+        return None
 
     def request_update_predeccessor(self, ip_port):
-        s_req = self.make_req_socket(ip_port)
-        s_req.send_string(Chord_Node.UPDATE_PRED + " " + json.dumps((self.id,self.ip)) )
-        s_req.recv_string()
+        response = self.send_request(ip_port,Chord_Node.UPDATE_PRED, json.dumps((self.id,self.ip)) )
+        if response:
+            return "OK"
+        return None
 
     def request_update_finger(self,node,ip_port,i):
-        s_req = self.make_req_socket(ip_port)
-        s_req.send_string(Chord_Node.UFT + " " + json.dumps([node,i] ) )
-        s_req.recv_string()
+        response = self.send_request(ip_port,Chord_Node.UFT, json.dumps([node,i] ) )
+        if response:
+            return "OK"
+        return None
     
     def request_finger_table(self, ip_port):
-        s_req = self.make_req_socket(ip_port)
-        s_req.send_string(Chord_Node.RFT + " " + " ")
-        finger = json.loads(s_req.recv_string())
-        return finger
+        response = self.send_request(ip_port,Chord_Node.RFT, " " )
+        if response:
+            return json.loads(response)
+        return None
+        
     
     def request_notify(self,ip_port):
-        s_req = self.make_req_socket(ip_port)
-        s_req.send_string(Chord_Node.NOTIFY + " " + json.dumps((self.id,self.ip)) )
-        s_req.recv_string()
+        response = self.send_request(ip_port,Chord_Node.NOTIFY,json.dumps((self.id,self.ip)) )
+        if response:
+            return "OK"
+        return None
     #============End Send Requests============
 
     #============Handling Requests============
@@ -247,6 +253,15 @@ class Chord_Node:
 
     #============Utils============
     
+    def send_request(self, ip_port, head,body):
+        s_req = self.make_req_socket(ip_port)
+        s_req.setsockopt( zmq.RCVTIMEO, 1000 ) # milliseconds
+        s_req.send_string(head + " " + body)
+        try:
+            return s_req.recv_string() # response
+        except:
+            return None # timeout
+
     def print_me(self):
         print("Node id: ", self.id)
         print("Node ip: ", self.ip)
