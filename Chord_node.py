@@ -4,6 +4,7 @@ import time
 import json
 import random
 import threading
+import select
 
 def split_ip(ip):
     return ip.split(':')
@@ -15,7 +16,9 @@ class Chord_Node:
     UPDATE_PRED = 'update_predeccessor'
     UFT = 'update_finger_table'
     RFT = 'request_finger_table'
+    RSL = 'request_succesor_list'
     NOTIFY = 'notify'
+    ALIVE = 'alive'
     #==========================
     
     def __init__(self, id, my_ip, m ,entry_point = None):
@@ -30,6 +33,7 @@ class Chord_Node:
         self.m = m
         #finger[i] = node with id >= id + 2^(i-1)
         self.finger = [(self.id,self.ip) for _ in range(m+1)] #finger[0] = Predecessor
+        self.succesors = [(self.id,self.ip) for _ in range(m)]
         if entry_point:
             self.join(entry_point)
         
@@ -43,24 +47,31 @@ class Chord_Node:
         self.handlers[Chord_Node.UFT] = self.request_update_finger_handler
         self.handlers[Chord_Node.RFT] = self.request_finger_table_handler
         self.handlers[Chord_Node.NOTIFY] = self.request_notify_handler
+        self.handlers[Chord_Node.ALIVE] = self.request_is_alive_handler
+        self.handlers[Chord_Node.RSL] = self.request_succesor_list_handler
         #------------------------------
 
         self.lock_finger = threading.Lock()
+        self.lock_succesors = threading.Lock()
         threading.Thread(target=self.infinit_fix_fingers, args=()).start()
         threading.Thread(target=self.infinit_stabilize, args=()).start()
+        threading.Thread(target=self.infinit_fix_succesors, args=()).start()
         self.run()
 
 
     #============Join node============
     def join(self,entry_point):
         self.init_finger_table(entry_point)
+        self.succesors = [self.finger[1] for _ in range(self.m)]
         self.update_others()
              
 
     def init_finger_table(self, ip):
         
         node_succ = self.request_successor(ip, self.start_idx(1))
-        
+        if not node_succ:
+            print('Unstable network, try again later')
+            exit()
         self.finger[1] =  (node_succ['id'], node_succ['ip'])
         self.finger[0] = node_succ['fg'][0] 
         
@@ -72,6 +83,9 @@ class Chord_Node:
                 self.finger[i+1] = self.finger[i]
             else:
                 succ_node = self.request_successor(ip,start)
+                if not succ_node:
+                    print('Unstable network, try again later')
+                    exit()
                 self.finger[i+1] = (succ_node['id'], succ_node['ip'])
 
     def update_others(self):
@@ -98,19 +112,43 @@ class Chord_Node:
     def stabilize(self):
         self.lock_finger.acquire()
         successor_finger_table = self.request_finger_table(self.finger[1][1])
-        predeccessor = successor_finger_table[0]
-        if self.inbetween(predeccessor[0], self.id,False , self.finger[1][0],False):
-            self.finger[1] = predeccessor
+        if successor_finger_table:
+            
+            predeccessor = successor_finger_table[0]
+            if self.inbetween(predeccessor[0], self.id,False , self.finger[1][0],False):
+                self.finger[1] = predeccessor
+                self.succesors[0]= predeccessor
+           
+        else:
+            suc_node = next( (n for n in self.succesors  if self.is_alive(n[1]) ) , None) 
+            if suc_node:
+                self.finger[1] = suc_node
+        
+        
         self.request_notify(self.finger[1][1])
+        
         self.lock_finger.release()
+        
     
     def fix_fingers(self):
+       
         self.lock_finger.acquire()
         i = random.randint(1,self.m)
         node = self.find_succesor(self.start_idx(i))
-        self.finger[i] = (node['id'], node['ip'])
+        if node:
+            self.finger[i] = (node['id'], node['ip'])
         self.lock_finger.release()
     
+    def fix_succesors(self):
+        self.lock_succesors.acquire()
+        self.succesors[0]= self.finger[1]
+        i = random.randint(1,self.m-1)
+        succesor_node = self.succesors[i-1]
+        node = self.find_succesor( (succesor_node[0] + 1) % (2**self.m) )
+        if  node:
+            self.succesors[i] = ( node['id'], node['ip'] )
+        self.lock_succesors.release()
+
     def infinit_stabilize(self):
         while True:
             print("\033c")
@@ -122,86 +160,141 @@ class Chord_Node:
         while True:
             self.fix_fingers()
             time.sleep(1)
+    
+    def infinit_fix_succesors(self):
+        while True:
+            self.fix_succesors()
+            time.sleep(1)
             
     #============End Stabilization============
 
     def find_succesor(self, idx):
         
         node = self.find_predecessor(idx)
-        
-        node_succ_id, node_succ_ip = node['fg'][1]
-        if node_succ_id == self.id:
+        if not node:
+            return None
+        succesors = self.succesors
+        if node['id'] != self.id:
+            succesors = self.request_succesor_list(node['ip'])
+            if not succesors:
+                return None
+        next_node = next( (n for n in succesors  if self.is_alive(n[1]) ) , None)
+        if not next_node:
+            return None
+        if next_node[0] == self.id:
             return self.to_dicctionary()
-        node_succ_finger = self.request_finger_table(node_succ_ip)
-        return {'id': node_succ_id, 'ip': node_succ_ip, 'fg': node_succ_finger}
+        
+        node_succ_finger = self.request_finger_table(next_node[1])
+        if node_succ_finger:
+            return {'id': next_node[0], 'ip': next_node[1], 'fg': node_succ_finger}
+
+        return None
 
     def find_predecessor(self, idx):
-        node = self.to_dicctionary()
+        node = (self.id, self.ip)
+        omit = []
         while(True):
-            id = node['id']
-            node_succ_id,node_succ_ip = node['fg'][1]
+            id = node[0]
+            ip = node[1]
+            ft = self.request_finger_table(node[1])
+            if not ft:
+                return None
+            node_succ_id, node_succ_ip = ft[1]
             if self.inbetween(idx, id,False, node_succ_id,True ):
-                return node
+                return {'id': node[0], 'ip': node[1], 'fg': ft}
             if id == self.id :
-                node = self.closest_preceding_finger(idx)
+                node = self.closest_preceding_finger(idx, omit)
             else:
-                node = self.request_closest_preceding_finger(node['ip'],idx)
-               
+                node = self.request_closest_preceding_finger(node[1],idx,omit)
+                if not node:
+                    return None
 
-    def closest_preceding_finger(self,idx):
+            alive = self.is_alive(node[1])
+            while(not alive):
+                omit.append(node[0])
+                if id == self.id :
+                    node = self.closest_preceding_finger(idx, omit)
+                else:
+                    node = self.request_closest_preceding_finger(ip,idx,omit)
+                    if not node:
+                        return None
+                alive = self.is_alive(node[1])
+
+            if node[0] == id:
+                return {'id': node[0], 'ip': node[1], 'fg': ft}
+
+    def closest_preceding_finger(self,idx , omit):
         for i in reversed(range(1,self.m+1)):
             node_id,node_ip = self.finger[i]
             if self.inbetween(node_id, self.id,False, idx,False ):
-                node_finger = self.request_finger_table(node_ip)
-                return {'id': node_id, 'ip': node_ip, 'fg': node_finger}
-        return self.to_dicctionary()
+                if node_id not in omit:
+                    return (node_id, node_ip)
+        
+        closest = next( (n for n in reversed(self.succesors)  if n[0] not in omit and self.inbetween(n[0], self.id,False, idx, False) ) , None)
+        if closest:
+            return closest
+        return (self.id,self.ip)
 
     #============Send Requests============
     
     def request_successor(self, ip_port, idx):
-        s_req = self.make_req_socket(ip_port)
-        s_req.send_string(Chord_Node.FS + " " + str(idx))
-        return json.loads(s_req.recv_string())
-
-    def request_closest_preceding_finger(self, ip_port,idx):
-        s_req = self.make_req_socket(ip_port)
-        s_req.send_string(Chord_Node.CPF + " " + str(idx))
-        n_node = s_req.recv_string()
-        node = json.loads(n_node)
-        return node
+        response = self.send_request(ip_port, Chord_Node.FS, str(idx))
+        if response:
+            return json.loads(response)
+        return None
+    
+    def request_closest_preceding_finger(self, ip_port,idx, omit):
+        response = self.send_request(ip_port, Chord_Node.CPF, str(idx) + " " + json.dumps(omit))
+        if response:
+            node = json.loads(response)
+            return node
+        return None
 
     def request_update_predeccessor(self, ip_port):
-        s_req = self.make_req_socket(ip_port)
-        s_req.send_string(Chord_Node.UPDATE_PRED + " " + json.dumps((self.id,self.ip)) )
-        s_req.recv_string()
+        response = self.send_request(ip_port,Chord_Node.UPDATE_PRED, json.dumps((self.id,self.ip)) )
+        if response:
+            return "OK"
+        return None
 
     def request_update_finger(self,node,ip_port,i):
-        s_req = self.make_req_socket(ip_port)
-        s_req.send_string(Chord_Node.UFT + " " + json.dumps([node,i] ) )
-        s_req.recv_string()
+        response = self.send_request(ip_port,Chord_Node.UFT, json.dumps([node,i] ) )
+        if response:
+            return "OK"
+        return None
     
     def request_finger_table(self, ip_port):
-        s_req = self.make_req_socket(ip_port)
-        s_req.send_string(Chord_Node.RFT + " " + " ")
-        finger = json.loads(s_req.recv_string())
-        return finger
+        if self.ip == ip_port:
+            return self.finger
+        response = self.send_request(ip_port,Chord_Node.RFT, " " )
+        if response:
+            return json.loads(response)
+        return None
+
+    def request_succesor_list(self,ip_port):
+        response = self.send_request(ip_port, Chord_Node.RSL, " ")
+        if response:
+            return json.loads(response)
+        return None
     
     def request_notify(self,ip_port):
-        s_req = self.make_req_socket(ip_port)
-        s_req.send_string(Chord_Node.NOTIFY + " " + json.dumps((self.id,self.ip)) )
-        s_req.recv_string()
+        response = self.send_request(ip_port,Chord_Node.NOTIFY,json.dumps((self.id,self.ip)) )
+        if response:
+            return "OK"
+        return None
+    
     #============End Send Requests============
 
     #============Handling Requests============
     def request_successor_handler(self, body):
         idx = int(body)
         node = self.find_succesor(idx)
-       
         self.s_rep.send_string(json.dumps(node) )
     
     def request_closest_preceding_finger_handler(self, body):
-        idx = int(body)
-        node = self.closest_preceding_finger(idx)
+        idx, omit = body.split(" ",1)
+        idx = int(idx)
+        omit = json.loads(omit)
+        node = self.closest_preceding_finger(idx,omit)
         self.s_rep.send_string(json.dumps(node))
     
     def request_update_predeccessor_handler(self, body):
@@ -217,23 +310,47 @@ class Chord_Node:
     def request_finger_table_handler(self, body = None):
         self.s_rep.send_string(json.dumps(self.finger))
     
+    def request_succesor_list_handler(self, body):
+        self.s_rep.send_string(json.dumps(self.succesors))
+    
     def request_notify_handler(self, body):
         p = json.loads(body)
-        if(self.inbetween(p[0], self.finger[0][0],False, self.id,False  )):
+        if self.is_alive(self.finger[0][1]):
+            if(self.inbetween(p[0], self.finger[0][0],False, self.id,False  )):
+                self.finger[0] = p
+        else:
             self.finger[0] = p
+
         self.s_rep.send_string('OK')
+    def request_is_alive_handler(self, body):
+        self.s_rep.send_string("OK")
     
     #============End Handling Requests============
     
 
     #============Utils============
     
+    def is_alive(self,ip_port):
+        if ip_port == self.ip:
+            return "OK"
+        return self.send_request(ip_port,Chord_Node.ALIVE, ' ')
+
+    def send_request(self, ip_port, head,body):
+        s_req = self.make_req_socket(ip_port)
+        s_req.setsockopt( zmq.RCVTIMEO, 1000 ) # milliseconds
+        s_req.send_string(head + " " + body)
+        try:
+            return s_req.recv_string() # response
+        except:
+            return None # timeout
+
     def print_me(self):
         print("Node id: ", self.id)
         print("Node ip: ", self.ip)
         print("Predecessor: ", self.finger[0])
         for i in range(1, self.m + 1):
             print(f'Finger[{i}]= (node id: {self.finger[i][0]} , node ip: {self.finger[i][1]} )')
+        print("Successors list: ", self.succesors)
 
     def inbetween(self,key, lwb, lequal, upb, requal):
         
