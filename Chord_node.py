@@ -34,7 +34,7 @@ class Chord_Node:
         self.m = m # number of bits
         self.r = m # number of succesors
         self.k = self.r//2 + 1 # number of nodes to replicate data
-        self.k= 1
+        self.k = 1
         #finger[i] = node with id >= id + 2^(i-1)
         self.finger = [(self.id,self.ip) for _ in range(m+1)] #finger[0] = Predecessor
         self.succesors = [(self.id,self.ip) for _ in range(m)]
@@ -43,13 +43,13 @@ class Chord_Node:
         self.latest_data = [] 
         self.predecessors_data = {}
         
-
+        
 
         if entry_point:
             self.join(entry_point)
         
         
-        self.insert_data("google " + str(self.id) , str(self.id) * 5)
+        
 
         #-----------handlers-----------
         self.handlers = {}
@@ -66,10 +66,14 @@ class Chord_Node:
 
         self.lock_finger = threading.Lock()
         self.lock_succesors = threading.Lock()
+        self.lock_predecessors_data = threading.Lock()
+        self.lock_data = threading.Lock()
         threading.Thread(target=self.infinit_fix_fingers, args=()).start()
         threading.Thread(target=self.infinit_stabilize, args=()).start()
         threading.Thread(target=self.infinit_fix_succesors, args=()).start()
         threading.Thread(target=self.infinit_replicate, args=()).start()
+
+        self.insert_data("google " + str(self.id) , str(self.id) * 5)
         self.run()
 
 
@@ -126,6 +130,7 @@ class Chord_Node:
     def stabilize(self):
         self.lock_finger.acquire()
         successor_finger_table = self.request_finger_table(self.finger[1][1])
+        take_care_of = []
         if successor_finger_table:
             
             predeccessor = successor_finger_table[0]
@@ -134,12 +139,16 @@ class Chord_Node:
                 self.succesors[0]= predeccessor
            
         else:
-            suc_node = next( (n for n in self.succesors  if self.is_alive(n[1]) ) , None) 
-            if suc_node:
-                self.finger[1] = suc_node
+            take_care_of.append(self.finger[1][0])
+            for i in range(1, len(self.succesors)):
+                n = self.succesors[i]
+                if self.is_alive(n[1]):
+                    self.finger[1]= n
+                    break
+                else:
+                    take_care_of.append(n[0])
         
-        
-        self.request_notify(self.finger[1][1])
+        self.request_notify(self.finger[1][1], take_care_of)
         
         self.lock_finger.release()
         
@@ -166,7 +175,7 @@ class Chord_Node:
     def infinit_stabilize(self):
         while True:
             print("\033c")
-            self.print_me()
+            self.print_me()   
             self.stabilize()
             time.sleep(1)
 
@@ -290,8 +299,8 @@ class Chord_Node:
             return json.loads(response)
         return None
     
-    def request_notify(self,ip_port):
-        response = self.send_request(ip_port,Chord_Node.NOTIFY,json.dumps((self.id,self.ip)) )
+    def request_notify(self,ip_port, take_care_of):
+        response = self.send_request(ip_port,Chord_Node.NOTIFY,json.dumps((self.id,self.ip)) + "&" + json.dumps(take_care_of) )
         if response:
             return "OK"
         return None
@@ -316,6 +325,7 @@ class Chord_Node:
         self.s_rep.send_string(json.dumps(node))
     
     def request_update_predeccessor_handler(self, body):
+        self.erase_last_predecessor_data()
         self.finger[0] = json.loads(body)
         self.s_rep.send_string('OK')
 
@@ -332,12 +342,17 @@ class Chord_Node:
         self.s_rep.send_string(json.dumps(self.succesors))
     
     def request_notify_handler(self, body):
-        p = json.loads(body)
+        p, take_care = body.split("&", 1)
+        p = json.loads(p)
+        take_care = json.loads(take_care)
         if self.is_alive(self.finger[0][1]):
             if(self.inbetween(p[0], self.finger[0][0],False, self.id,False  )):
+                self.erase_last_predecessor_data()
                 self.finger[0] = p
         else:
+            #print(f' {self.finger[0][0]} not alive')
             self.finger[0] = p
+            self.take_care_of(take_care)
 
         self.s_rep.send_string('OK')
     def request_is_alive_handler(self, body):
@@ -347,6 +362,7 @@ class Chord_Node:
         id, data = body.split(" ", 1)
         id = int(id)
         data = json.loads(data)
+        self.lock_predecessors_data.acquire()
         try:
             self.predecessors_data[id]
         except KeyError:
@@ -355,18 +371,40 @@ class Chord_Node:
             predecessor_data = self.predecessors_data[id]
             predecessor_data[d[0]] = d[1]
 
-
+        self.lock_predecessors_data.release()
         self.s_rep.send_string('OK')
     #============End Handling Requests============
     
     #============Data============
     
     def insert_data(self,key,value):
-        self.data[key] = value
-        if len(self.latest_data) == 50:
-            self.latest_data.pop(0)
-        self.latest_data.append((key,value))
+        self.lock_data.acquire()
+        try:
+            self.data[key]
+        except KeyError:
+            self.data[key] = value
+            if len(self.latest_data) == 100:
+                self.latest_data.pop(0)
+            self.latest_data.append((key,value))
+        self.lock_data.release()
 
+    def erase_last_predecessor_data(self):
+        self.lock_predecessors_data.acquire()
+        p = [id for id in self.predecessors_data]
+        if not p:
+            self.lock_predecessors_data.release()
+            return
+        p.sort()
+        to_erase = 0
+        if p[-1] > self.id:
+            to_erase = p[-1]
+        else:
+            to_erase = p[0]
+        del self.predecessors_data[to_erase]
+        
+        self.lock_predecessors_data.release()
+       
+        
     def replicate(self):
         i = random.randint(0, self.k-1)
         node = self.succesors[i]
@@ -382,6 +420,20 @@ class Chord_Node:
 
     #============Utils============
     
+    def take_care_of(self, take_care):
+        #print("aaaaaaaaaaaaa")
+        self.lock_predecessors_data.acquire()
+       # print('take care of: ', take_care)
+        for id in take_care:
+            for k,v in self.predecessors_data[id].items():
+                #print(f'insert {k} {v}' )
+                self.insert_data(k,v)
+            del self.predecessors_data[id]
+        #print('data:')
+        #print(self.data)
+        #print('bbbbbbbbbbbbbbb')
+        self.lock_predecessors_data.release()
+
     def is_alive(self,ip_port):
         if ip_port == self.ip:
             return "OK"
@@ -397,6 +449,8 @@ class Chord_Node:
             return None # timeout
 
     def print_me(self):
+        self.lock_data.acquire()
+        self.lock_predecessors_data.acquire()
         print("Node id: ", self.id)
         print("Node ip: ", self.ip)
         print("Predecessor: ", self.finger[0])
@@ -407,6 +461,8 @@ class Chord_Node:
         print(self.data)
         print("Replicated data:")
         print(self.predecessors_data)
+        self.lock_data.release()
+        self.lock_predecessors_data.release()
 
     def inbetween(self,key, lwb, lequal, upb, requal):
         
