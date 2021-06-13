@@ -43,7 +43,10 @@ class Chord_Node:
         self.latest_data = [] 
         self.predecessors_data = {}
         
-        
+        self.lock_finger = threading.Lock()
+        self.lock_succesors = threading.Lock()
+        self.lock_predecessors_data = threading.Lock()
+        self.lock_data = threading.Lock()
 
         if entry_point:
             self.join(entry_point)
@@ -64,16 +67,14 @@ class Chord_Node:
         self.handlers[Chord_Node.PRQ] = self.request_pull_handler
         #------------------------------
 
-        self.lock_finger = threading.Lock()
-        self.lock_succesors = threading.Lock()
-        self.lock_predecessors_data = threading.Lock()
-        self.lock_data = threading.Lock()
+        
         threading.Thread(target=self.infinit_fix_fingers, args=()).start()
         threading.Thread(target=self.infinit_stabilize, args=()).start()
         threading.Thread(target=self.infinit_fix_succesors, args=()).start()
         threading.Thread(target=self.infinit_replicate, args=()).start()
+        
+        self.insert_data((self.id, 'google ' + str(self.id)) , str(self.id) * 5)
 
-        self.insert_data("google " + str(self.id) , str(self.id) * 5)
         self.run()
 
 
@@ -276,6 +277,11 @@ class Chord_Node:
     def request_update_predeccessor(self, ip_port):
         response = self.send_request(ip_port,Chord_Node.UPDATE_PRED, json.dumps((self.id,self.ip)) )
         if response:
+            response = json.loads(response)
+            if response:
+                for d in response:
+                    self.insert_data(tuple(d['k']), d['v'] )
+                #dic = { tuple(d['k']): d['v']  for d in response}
             return "OK"
         return None
 
@@ -323,11 +329,25 @@ class Chord_Node:
         omit = json.loads(omit)
         node = self.closest_preceding_finger(idx,omit)
         self.s_rep.send_string(json.dumps(node))
-    
+
     def request_update_predeccessor_handler(self, body):
         self.erase_last_predecessor_data()
+        prev_pred = self.finger[0][0]
         self.finger[0] = json.loads(body)
-        self.s_rep.send_string('OK')
+        send_data = {}
+        keys_to_erase = []
+        self.lock_data.acquire()
+        for k,v in self.data.items():
+            if self.inbetween(k[0], prev_pred, False, self.finger[0][0], True):
+                send_data[k] = v
+                keys_to_erase.append(k)
+        for k in keys_to_erase:
+            self.erase_data(k)
+
+        
+        to_list = [{'k':k, 'v': v} for k,v in send_data.items()]
+        self.lock_data.release()
+        self.s_rep.send_string(json.dumps(to_list))
 
     def request_update_finger_handler(self, body):
         node, i = json.loads(body)
@@ -350,7 +370,6 @@ class Chord_Node:
                 self.erase_last_predecessor_data()
                 self.finger[0] = p
         else:
-            #print(f' {self.finger[0][0]} not alive')
             self.finger[0] = p
             self.take_care_of(take_care)
 
@@ -367,9 +386,10 @@ class Chord_Node:
             self.predecessors_data[id]
         except KeyError:
             self.predecessors_data[id] = {}
+        
+        predecessor_data = self.predecessors_data[id]
         for d in data:
-            predecessor_data = self.predecessors_data[id]
-            predecessor_data[d[0]] = d[1]
+            predecessor_data[tuple(d[0]) ] = d[1]
 
         self.lock_predecessors_data.release()
         self.s_rep.send_string('OK')
@@ -387,6 +407,14 @@ class Chord_Node:
                 self.latest_data.pop(0)
             self.latest_data.append((key,value))
         self.lock_data.release()
+
+    def erase_data(self , key):
+        del self.data[key]
+        for i in range(len(self.latest_data)):
+            if self.latest_data[i][0] == key:
+                del self.latest_data[i]
+                break
+        
 
     def erase_last_predecessor_data(self):
         self.lock_predecessors_data.acquire()
@@ -408,7 +436,7 @@ class Chord_Node:
     def replicate(self):
         i = random.randint(0, self.k-1)
         node = self.succesors[i]
-        if node[0] != self.id:
+        if node[0] != self.id and self.data:
             self.request_pull(node[1]) 
     
     def infinit_replicate(self):
@@ -421,17 +449,12 @@ class Chord_Node:
     #============Utils============
     
     def take_care_of(self, take_care):
-        #print("aaaaaaaaaaaaa")
         self.lock_predecessors_data.acquire()
-       # print('take care of: ', take_care)
         for id in take_care:
             for k,v in self.predecessors_data[id].items():
-                #print(f'insert {k} {v}' )
+                
                 self.insert_data(k,v)
             del self.predecessors_data[id]
-        #print('data:')
-        #print(self.data)
-        #print('bbbbbbbbbbbbbbb')
         self.lock_predecessors_data.release()
 
     def is_alive(self,ip_port):
