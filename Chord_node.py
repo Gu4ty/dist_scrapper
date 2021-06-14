@@ -19,6 +19,7 @@ class Chord_Node:
     RSL = 'request_succesor_list'
     NOTIFY = 'notify'
     ALIVE = 'alive'
+    PRQ = 'pull_request'
     #==========================
     
     def __init__(self, id, my_ip, m ,entry_point = None):
@@ -30,12 +31,26 @@ class Chord_Node:
 
         self.id = id
         self.ip = my_ip
-        self.m = m
+        self.m = m # number of bits
+        self.r = m # number of succesors
+        self.k = self.r//2 + 1 # number of nodes to replicate data
+        self.k = 1
         #finger[i] = node with id >= id + 2^(i-1)
         self.finger = [(self.id,self.ip) for _ in range(m+1)] #finger[0] = Predecessor
         self.succesors = [(self.id,self.ip) for _ in range(m)]
+        
+        self.data = {}
+        self.latest_data = [] 
+        self.predecessors_data = {}
+        
+        self.lock_finger = threading.Lock()
+        self.lock_succesors = threading.Lock()
+        self.lock_predecessors_data = threading.Lock()
+        self.lock_data = threading.Lock()
+
         if entry_point:
             self.join(entry_point)
+        
         
         
 
@@ -49,20 +64,24 @@ class Chord_Node:
         self.handlers[Chord_Node.NOTIFY] = self.request_notify_handler
         self.handlers[Chord_Node.ALIVE] = self.request_is_alive_handler
         self.handlers[Chord_Node.RSL] = self.request_succesor_list_handler
+        self.handlers[Chord_Node.PRQ] = self.request_pull_handler
         #------------------------------
 
-        self.lock_finger = threading.Lock()
-        self.lock_succesors = threading.Lock()
+        
         threading.Thread(target=self.infinit_fix_fingers, args=()).start()
         threading.Thread(target=self.infinit_stabilize, args=()).start()
         threading.Thread(target=self.infinit_fix_succesors, args=()).start()
+        threading.Thread(target=self.infinit_replicate, args=()).start()
+        
+        self.insert_data((self.id, 'google ' + str(self.id)) , str(self.id) * 5)
+
         self.run()
 
 
     #============Join node============
     def join(self,entry_point):
         self.init_finger_table(entry_point)
-        self.succesors = [self.finger[1] for _ in range(self.m)]
+        self.succesors = [self.finger[1] for _ in range(self.r)]
         self.update_others()
              
 
@@ -112,6 +131,7 @@ class Chord_Node:
     def stabilize(self):
         self.lock_finger.acquire()
         successor_finger_table = self.request_finger_table(self.finger[1][1])
+        take_care_of = []
         if successor_finger_table:
             
             predeccessor = successor_finger_table[0]
@@ -120,12 +140,16 @@ class Chord_Node:
                 self.succesors[0]= predeccessor
            
         else:
-            suc_node = next( (n for n in self.succesors  if self.is_alive(n[1]) ) , None) 
-            if suc_node:
-                self.finger[1] = suc_node
+            take_care_of.append(self.finger[1][0])
+            for i in range(1, len(self.succesors)):
+                n = self.succesors[i]
+                if self.is_alive(n[1]):
+                    self.finger[1]= n
+                    break
+                else:
+                    take_care_of.append(n[0])
         
-        
-        self.request_notify(self.finger[1][1])
+        self.request_notify(self.finger[1][1], take_care_of)
         
         self.lock_finger.release()
         
@@ -142,7 +166,7 @@ class Chord_Node:
     def fix_succesors(self):
         self.lock_succesors.acquire()
         self.succesors[0]= self.finger[1]
-        i = random.randint(1,self.m-1)
+        i = random.randint(1,self.r-1)
         succesor_node = self.succesors[i-1]
         node = self.find_succesor( (succesor_node[0] + 1) % (2**self.m) )
         if  node:
@@ -152,7 +176,7 @@ class Chord_Node:
     def infinit_stabilize(self):
         while True:
             print("\033c")
-            self.print_me()
+            self.print_me()   
             self.stabilize()
             time.sleep(1)
 
@@ -253,6 +277,11 @@ class Chord_Node:
     def request_update_predeccessor(self, ip_port):
         response = self.send_request(ip_port,Chord_Node.UPDATE_PRED, json.dumps((self.id,self.ip)) )
         if response:
+            response = json.loads(response)
+            if response:
+                for d in response:
+                    self.insert_data(tuple(d['k']), d['v'] )
+                #dic = { tuple(d['k']): d['v']  for d in response}
             return "OK"
         return None
 
@@ -276,12 +305,16 @@ class Chord_Node:
             return json.loads(response)
         return None
     
-    def request_notify(self,ip_port):
-        response = self.send_request(ip_port,Chord_Node.NOTIFY,json.dumps((self.id,self.ip)) )
+    def request_notify(self,ip_port, take_care_of):
+        response = self.send_request(ip_port,Chord_Node.NOTIFY,json.dumps((self.id,self.ip)) + "&" + json.dumps(take_care_of) )
         if response:
             return "OK"
         return None
     
+    def request_pull(self, ip_port):
+        response = self.send_request(ip_port,Chord_Node.PRQ, str(self.id) + " " + json.dumps(self.latest_data) )
+        return response
+
     #============End Send Requests============
 
     #============Handling Requests============
@@ -296,10 +329,25 @@ class Chord_Node:
         omit = json.loads(omit)
         node = self.closest_preceding_finger(idx,omit)
         self.s_rep.send_string(json.dumps(node))
-    
+
     def request_update_predeccessor_handler(self, body):
+        self.erase_last_predecessor_data()
+        prev_pred = self.finger[0][0]
         self.finger[0] = json.loads(body)
-        self.s_rep.send_string('OK')
+        send_data = {}
+        keys_to_erase = []
+        self.lock_data.acquire()
+        for k,v in self.data.items():
+            if self.inbetween(k[0], prev_pred, False, self.finger[0][0], True):
+                send_data[k] = v
+                keys_to_erase.append(k)
+        for k in keys_to_erase:
+            self.erase_data(k)
+
+        
+        to_list = [{'k':k, 'v': v} for k,v in send_data.items()]
+        self.lock_data.release()
+        self.s_rep.send_string(json.dumps(to_list))
 
     def request_update_finger_handler(self, body):
         node, i = json.loads(body)
@@ -314,22 +362,101 @@ class Chord_Node:
         self.s_rep.send_string(json.dumps(self.succesors))
     
     def request_notify_handler(self, body):
-        p = json.loads(body)
+        p, take_care = body.split("&", 1)
+        p = json.loads(p)
+        take_care = json.loads(take_care)
         if self.is_alive(self.finger[0][1]):
             if(self.inbetween(p[0], self.finger[0][0],False, self.id,False  )):
+                self.erase_last_predecessor_data()
                 self.finger[0] = p
         else:
             self.finger[0] = p
+            self.take_care_of(take_care)
 
         self.s_rep.send_string('OK')
     def request_is_alive_handler(self, body):
         self.s_rep.send_string("OK")
     
+    def request_pull_handler(self, body):
+        id, data = body.split(" ", 1)
+        id = int(id)
+        data = json.loads(data)
+        self.lock_predecessors_data.acquire()
+        try:
+            self.predecessors_data[id]
+        except KeyError:
+            self.predecessors_data[id] = {}
+        
+        predecessor_data = self.predecessors_data[id]
+        for d in data:
+            predecessor_data[tuple(d[0]) ] = d[1]
+
+        self.lock_predecessors_data.release()
+        self.s_rep.send_string('OK')
     #============End Handling Requests============
     
+    #============Data============
+    
+    def insert_data(self,key,value):
+        self.lock_data.acquire()
+        try:
+            self.data[key]
+        except KeyError:
+            self.data[key] = value
+            if len(self.latest_data) == 100:
+                self.latest_data.pop(0)
+            self.latest_data.append((key,value))
+        self.lock_data.release()
+
+    def erase_data(self , key):
+        del self.data[key]
+        for i in range(len(self.latest_data)):
+            if self.latest_data[i][0] == key:
+                del self.latest_data[i]
+                break
+        
+
+    def erase_last_predecessor_data(self):
+        self.lock_predecessors_data.acquire()
+        p = [id for id in self.predecessors_data]
+        if not p:
+            self.lock_predecessors_data.release()
+            return
+        p.sort()
+        to_erase = 0
+        if p[-1] > self.id:
+            to_erase = p[-1]
+        else:
+            to_erase = p[0]
+        del self.predecessors_data[to_erase]
+        
+        self.lock_predecessors_data.release()
+       
+        
+    def replicate(self):
+        i = random.randint(0, self.k-1)
+        node = self.succesors[i]
+        if node[0] != self.id and self.data:
+            self.request_pull(node[1]) 
+    
+    def infinit_replicate(self):
+        while True:
+            self.replicate()
+            time.sleep(1)
+
+    #============End Data============
 
     #============Utils============
     
+    def take_care_of(self, take_care):
+        self.lock_predecessors_data.acquire()
+        for id in take_care:
+            for k,v in self.predecessors_data[id].items():
+                
+                self.insert_data(k,v)
+            del self.predecessors_data[id]
+        self.lock_predecessors_data.release()
+
     def is_alive(self,ip_port):
         if ip_port == self.ip:
             return "OK"
@@ -345,12 +472,20 @@ class Chord_Node:
             return None # timeout
 
     def print_me(self):
+        self.lock_data.acquire()
+        self.lock_predecessors_data.acquire()
         print("Node id: ", self.id)
         print("Node ip: ", self.ip)
         print("Predecessor: ", self.finger[0])
         for i in range(1, self.m + 1):
             print(f'Finger[{i}]= (node id: {self.finger[i][0]} , node ip: {self.finger[i][1]} )')
         print("Successors list: ", self.succesors)
+        print("Data:")
+        print(self.data)
+        print("Replicated data:")
+        print(self.predecessors_data)
+        self.lock_data.release()
+        self.lock_predecessors_data.release()
 
     def inbetween(self,key, lwb, lequal, upb, requal):
         
