@@ -475,10 +475,10 @@ class Chord_Node:
             html = self.data[(hash,url)]
         except KeyError:
             webUrl  = urllib.request.urlopen(url)
-            html = str(webUrl.read())[2:-1]
+            html = str(webUrl.read())#[2:-1]
             self.insert_data((hash,url), html)
         
-        self.s_rep(html)
+        self.s_rep.send_string(html)
 
         # url, depth = body.split(" ",1)
         # depth = int(depth)
@@ -593,15 +593,16 @@ class Chord_Node:
                 break    
 
 def main():
-    id = int(sys.argv[1])
-    ip = sys.argv[2]
-    m = int(sys.argv[3])
-    entry = None
-    if len(sys.argv) ==5:
-        entry = sys.argv[4]
+    # id = int(sys.argv[1])
+    # ip = sys.argv[2]
+    # m = int(sys.argv[3])
+    # entry = None
+    # if len(sys.argv) ==5:
+    #     entry = sys.argv[4]
     
-    n = Chord_Node(id,ip,m,entry)
-    n.run()
+    # n = Chord_Node(id,ip,m,entry)
+    n = Chord_Node(1,'127.0.0.1:5003',3,None)
+    # n.run()
 
 if __name__ == "__main__":
     main()
