@@ -601,6 +601,7 @@ def main():
         entry = sys.argv[4]
     
     n = Chord_Node(id,ip,m,entry)
+    n.run()
 
 if __name__ == "__main__":
     main()
