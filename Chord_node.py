@@ -5,6 +5,9 @@ import json
 import random
 import threading
 import select
+import hashlib
+import urllib.request
+import re
 
 def split_ip(ip):
     return ip.split(':')
@@ -20,6 +23,8 @@ class Chord_Node:
     NOTIFY = 'notify'
     ALIVE = 'alive'
     PRQ = 'pull_request'
+    LC = 'locate'
+    GET = 'get'
     #==========================
     
     def __init__(self, id, my_ip, m ,entry_point = None):
@@ -65,6 +70,8 @@ class Chord_Node:
         self.handlers[Chord_Node.ALIVE] = self.request_is_alive_handler
         self.handlers[Chord_Node.RSL] = self.request_succesor_list_handler
         self.handlers[Chord_Node.PRQ] = self.request_pull_handler
+        self.handlers[Chord_Node.LC] = self.request_locate
+        self.handlers[Chord_Node.GET] = self.request_get
         #------------------------------
 
         
@@ -445,6 +452,53 @@ class Chord_Node:
             time.sleep(1)
 
     #============End Data============
+
+
+    #============Hash================
+
+    def int_hash(self,str):
+        bytes_rep = hashlib.sha256(bytes(str, 'utf-8')).digest()        
+        return int.from_bytes(bytes_rep,"big") % (2**self.m)
+        
+
+    #============End Hash============
+    #============Scraper=============
+
+    def request_locate(self, body):
+        node = self.find_predecessor(self.int_hash(body))
+        self.s_rep.send_string(node['ip'])
+
+    def request_get(self,url):
+        hash = self.int_hash(url)
+        html = None
+        try:
+            html = self.data[(hash,url)]
+        except KeyError:
+            webUrl  = urllib.request.urlopen(url)
+            html = str(webUrl.read())[2:-1]
+            self.insert_data((hash,url), html)
+        
+        self.s_rep(html)
+
+        # url, depth = body.split(" ",1)
+        # depth = int(depth)
+        # webUrl  = urllib.request.urlopen(url)
+
+        # data = str(webUrl.read())[2:]
+       
+        # indexes =[m.start() for m in re.finditer(' href=', data)]
+        
+        # links= {}
+        
+        # for i in indexes:
+        #     index =data.find('"',i+7)
+        #     links[i] = data[i+7:index]
+
+        # return None
+            
+
+
+    #============End Scraper=========
 
     #============Utils============
     
