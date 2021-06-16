@@ -9,11 +9,8 @@ import hashlib
 import urllib.request
 import re
 import requests
-try: 
-    from BeautifulSoup import BeautifulSoup
-except ImportError:
-    from bs4 import BeautifulSoup
-import xml.etree
+from bs4 import BeautifulSoup
+import argparse
 
 def split_ip(ip):
     return ip.split(':')
@@ -189,7 +186,7 @@ class Chord_Node:
     def infinit_stabilize(self):
         while True:
             print("\033c")
-            self.print_me()   
+            # self.print_me()   
             self.stabilize()
             time.sleep(1)
 
@@ -471,7 +468,7 @@ class Chord_Node:
     #============Scraper=============
 
     def request_locate(self, body):
-        node = self.find_predecessor(self.int_hash(body))
+        node = self.find_succesor(self.int_hash(body))
         self.s_rep.send_string(node['ip'])
 
     def request_get(self,url):
@@ -480,34 +477,21 @@ class Chord_Node:
         try:
             html = self.data[(hash,url)]
         except KeyError:
-            # webUrl  = urllib.request.urlopen(url)
-            # html = str(webUrl.read())#[2:-1]
-            resp = requests.get(url)
-            data = resp.text
-            html = data#the HTML code you've written above
-            parsed_html = BeautifulSoup(html,features = "html.parser")  
-            # parsed_html = xml.etree.ElementTree.fromstring(html)          
+            try:
+                resp = requests.get(url)
+            except:
+                self.s_rep.send_string('bad request')
+                return
+            
+            html = resp.text            
+            parsed_html = BeautifulSoup(html,features = "html.parser")             
+                      
             html =str(parsed_html)
             self.insert_data((hash,url), html)
         
         self.s_rep.send_string(html)
 
-        # url, depth = body.split(" ",1)
-        # depth = int(depth)
-        # webUrl  = urllib.request.urlopen(url)
-
-        # data = str(webUrl.read())[2:]
-       
-        # indexes =[m.start() for m in re.finditer(' href=', data)]
-        
-        # links= {}
-        
-        # for i in indexes:
-        #     index =data.find('"',i+7)
-        #     links[i] = data[i+7:index]
-
-        # return None
-            
+    
 
 
     #============End Scraper=========
@@ -605,6 +589,15 @@ class Chord_Node:
                 break    
 
 def main():
+    params = sys.argv[1:]
+    parser = argparse.ArgumentParser(prog='PROG')
+    parser.add_argument('-id', type= int)
+    parser.add_argument('-addr')
+    parser.add_argument('-bits', type=int)
+    parser.add_argument('-entry_addr')
+    
+    args =parser.parse_args(params)
+    args = vars(args)
     # id = int(sys.argv[1])
     # ip = sys.argv[2]
     # m = int(sys.argv[3])
@@ -613,7 +606,7 @@ def main():
     #     entry = sys.argv[4]
     
     # n = Chord_Node(id,ip,m,entry)
-    n = Chord_Node(1,'127.0.0.1:5003',3,None)
+    n = Chord_Node(args['id'],args['addr'],args['bits'], args['entry_addr'])
     # n.run()
 
 if __name__ == "__main__":
