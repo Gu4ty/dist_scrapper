@@ -5,6 +5,12 @@ import json
 import random
 import threading
 import select
+import hashlib
+import urllib.request
+import re
+import requests
+from bs4 import BeautifulSoup
+import argparse
 
 def split_ip(ip):
     return ip.split(':')
@@ -20,6 +26,8 @@ class Chord_Node:
     NOTIFY = 'notify'
     ALIVE = 'alive'
     PRQ = 'pull_request'
+    LC = 'locate'
+    GET = 'get'
     #==========================
     
     def __init__(self, id, my_ip, m ,entry_point = None):
@@ -65,6 +73,8 @@ class Chord_Node:
         self.handlers[Chord_Node.ALIVE] = self.request_is_alive_handler
         self.handlers[Chord_Node.RSL] = self.request_succesor_list_handler
         self.handlers[Chord_Node.PRQ] = self.request_pull_handler
+        self.handlers[Chord_Node.LC] = self.request_locate
+        self.handlers[Chord_Node.GET] = self.request_get
         #------------------------------
 
         
@@ -176,7 +186,7 @@ class Chord_Node:
     def infinit_stabilize(self):
         while True:
             print("\033c")
-            self.print_me()   
+            # self.print_me()   
             self.stabilize()
             time.sleep(1)
 
@@ -446,6 +456,46 @@ class Chord_Node:
 
     #============End Data============
 
+
+    #============Hash================
+
+    def int_hash(self,str):
+        bytes_rep = hashlib.sha256(bytes(str, 'utf-8')).digest()        
+        return int.from_bytes(bytes_rep,"big") % (2**self.m)
+        
+
+    #============End Hash============
+    #============Scraper=============
+
+    def request_locate(self, body):
+        node = self.find_succesor(self.int_hash(body))
+        self.s_rep.send_string(node['ip'])
+
+    def request_get(self,url):
+        hash = self.int_hash(url)
+        html = None
+        try:
+            html = self.data[(hash,url)]
+        except KeyError:
+            try:
+                resp = requests.get(url)
+            except:
+                self.s_rep.send_string('bad request')
+                return
+            
+            html = resp.text            
+            parsed_html = BeautifulSoup(html,features = "html.parser")             
+                      
+            html =str(parsed_html)
+            self.insert_data((hash,url), html)
+        
+        self.s_rep.send_string(html)
+
+    
+
+
+    #============End Scraper=========
+
     #============Utils============
     
     def take_care_of(self, take_care):
@@ -539,14 +589,17 @@ class Chord_Node:
                 break    
 
 def main():
-    id = int(sys.argv[1])
-    ip = sys.argv[2]
-    m = int(sys.argv[3])
-    entry = None
-    if len(sys.argv) ==5:
-        entry = sys.argv[4]
+    params = sys.argv[1:]
+    parser = argparse.ArgumentParser(prog='PROG')
+    parser.add_argument('-id', type= int)
+    parser.add_argument('-addr')
+    parser.add_argument('-bits', type=int)
+    parser.add_argument('-entry_addr')
     
-    n = Chord_Node(id,ip,m,entry)
+    args =parser.parse_args(params)
+    args = vars(args)
+    n = Chord_Node(args['id'],args['addr'],args['bits'], args['entry_addr'])
+    
 
 if __name__ == "__main__":
     main()
