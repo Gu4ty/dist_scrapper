@@ -1,3 +1,4 @@
+from typing import Collection
 import zmq
 import sys
 import time
@@ -10,7 +11,7 @@ import urllib
 import re
 import shutil
 import argparse
-
+import collections
 from zmq.sugar.frame import Message
 
 class Client:
@@ -43,7 +44,7 @@ class Client:
     
     def send_request(self, ip_port, head,body):
         s_req = self.make_req_socket(ip_port)
-        # s_req.setsockopt( zmq.RCVTIMEO, 15000 ) # milliseconds
+        s_req.setsockopt( zmq.RCVTIMEO, 45000 ) # milliseconds
         s_req.send_string(head + " " + body)
         try:
             return s_req.recv_string() # response
@@ -78,11 +79,12 @@ class Client:
                     return self.TO_TEXT
         
         html = self.update_html(links,html)
+
         file = open(f'./{folder}/base.html', 'x',encoding='utf8')
         file.write(html)
         file.close()
 
-        return f'Scrap saved to {os.curdir}/{folder}.'
+        return f'Scrap saved to {os.getcwd()}/{folder}'
 
     def scrap(self,req_addr,url,depth, base_path='',folder_name=0):
         if depth<0:
@@ -119,18 +121,18 @@ class Client:
         if not keys:
             return html
         index = keys[0]+len(links[keys[0]])
-        
-        aux=html[:keys[0]]
+        aux = collections.deque()
+        aux.append(html[:keys[0]])
 
         for i in range(len(keys)):
             link = links[keys[i]]
             extension = '.css' if link.endswith('.css') else '.html'
             index = keys[i]+len(link)
             if i+1 < len(keys):
-                aux+=str(keys[i])+'/'+str(keys[i])+extension+html[index:keys[i+1]]
+                aux.append(str(keys[i])+'/'+str(keys[i])+extension+html[index:keys[i+1]])
             else:
-                aux+=str(keys[i])+'/'+str(keys[i])+extension+html[index:]
-        return aux
+                aux.append(str(keys[i])+'/'+str(keys[i])+extension+html[index:])
+        return ''.join(aux)
 
     def get_hrefs(self,html):       
         indexes =[m.start() for m in re.finditer(' href=', html)]        
@@ -191,6 +193,8 @@ class Client:
                 if resp_message == self.TO_TEXT:
                     i-=1
                 else:
+                    print('\n Press Enter to continue...')
+                    input()
                     break
 
 def main():
