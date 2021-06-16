@@ -34,8 +34,13 @@ class Chord_Node:
         
         self.context = zmq.Context()
         ip,port = split_ip(my_ip)
+        self.s_rep_html = self.context.socket(zmq.REP)
         self.s_rep = self.context.socket(zmq.REP)
         self.s_rep.bind("tcp://%s:%s" %(ip,port))
+        port = int(port)
+        port+=1
+        port = str(port)
+        self.s_rep_html.bind("tcp://%s:%s" %(ip,port))
 
         self.id = id
         self.ip = my_ip
@@ -82,8 +87,7 @@ class Chord_Node:
         threading.Thread(target=self.infinit_stabilize, args=()).start()
         threading.Thread(target=self.infinit_fix_succesors, args=()).start()
         threading.Thread(target=self.infinit_replicate, args=()).start()
-        
-        self.insert_data((self.id, 'google ' + str(self.id)) , str(self.id) * 5)
+        threading.Thread(target=self.client_requests, args=()).start()
 
         self.run()
 
@@ -185,8 +189,8 @@ class Chord_Node:
 
     def infinit_stabilize(self):
         while True:
-            print("\033c")
-            # self.print_me()   
+            #print("\033c")
+            self.print_me()   
             self.stabilize()
             time.sleep(1)
 
@@ -469,7 +473,11 @@ class Chord_Node:
 
     def request_locate(self, body):
         node = self.find_succesor(self.int_hash(body))
-        self.s_rep.send_string(node['ip'])
+        ip, port = split_ip(node['ip'])
+        port = int(port)
+        port += 1
+        ip = ip + ':' + str(port)
+        self.s_rep_html.send_string(ip)
 
     def request_get(self,url):
         hash = self.int_hash(url)
@@ -480,7 +488,7 @@ class Chord_Node:
             try:
                 resp = requests.get(url)
             except:
-                self.s_rep.send_string('bad request')
+                self.s_rep_html.send_string('bad request')
                 return
             
             html = resp.text            
@@ -489,9 +497,14 @@ class Chord_Node:
             html =str(parsed_html)
             self.insert_data((hash,url), html)
         
-        self.s_rep.send_string(html)
+        self.s_rep_html.send_string(html)
 
-    
+    def client_requests(self):
+        while(True): 
+            req = self.s_rep_html.recv_string()
+            header,body = req.split(" ",1)
+            self.handlers[header](body)
+                    
 
 
     #============End Scraper=========
@@ -501,10 +514,13 @@ class Chord_Node:
     def take_care_of(self, take_care):
         self.lock_predecessors_data.acquire()
         for id in take_care:
-            for k,v in self.predecessors_data[id].items():
-                
-                self.insert_data(k,v)
-            del self.predecessors_data[id]
+            try:
+                for k,v in self.predecessors_data[id].items():
+                    
+                    self.insert_data(k,v)
+                del self.predecessors_data[id]
+            except KeyError:
+                pass
         self.lock_predecessors_data.release()
 
     def is_alive(self,ip_port):
@@ -531,9 +547,14 @@ class Chord_Node:
             print(f'Finger[{i}]= (node id: {self.finger[i][0]} , node ip: {self.finger[i][1]} )')
         print("Successors list: ", self.succesors)
         print("Data:")
-        print(self.data)
+        #print(self.data)
+        for k in self.data:
+            print(f'{k} -> html of {k[1]}')
         print("Replicated data:")
-        print(self.predecessors_data)
+        #print(self.predecessors_data)
+        for key in self.predecessors_data:
+            for k in self.predecessors_data[key]:
+                print(f'{k} -> html of {k[1]}')
         self.lock_data.release()
         self.lock_predecessors_data.release()
 
