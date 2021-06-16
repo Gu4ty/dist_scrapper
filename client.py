@@ -64,7 +64,7 @@ class Client:
 
         html = self.update_html(links,html)
         
-        file = open(f'./{folder}/base.html', 'x')
+        file = open(f'./{folder}/base.html', 'x',encoding='utf8')
         file.write(html)
         file.close()
 
@@ -83,7 +83,7 @@ class Client:
 
         html = self.update_html(links,html)
         
-        file = open(f'./{folder}/{folder_name}.html', 'x')
+        file = open(f'./{folder}/{folder_name}.html', 'x', encoding='utf8')
         file.write(html)
         file.close()
 
@@ -91,6 +91,8 @@ class Client:
         
         keys= list(links.keys())
         keys.sort()
+        if not keys:
+            return html
         index = keys[0]+len(links[keys[0]])
         
         aux=html[:keys[0]]
@@ -140,7 +142,7 @@ def main():
     client_ip = '127.0.0.1:5000'
 
     c = Client(client_ip)
-    c.base_scrap('127.0.0.1:5003','http://www.granma.cu', 1 )
+    c.base_scrap('127.0.0.1:5003','https://evea.uh.cu', 1 )
     # h = c.request_html('url', '127.0.0.1:5001')
     # print(h)
     # os.makedirs('Pedidos/1- www.google.com.cu')

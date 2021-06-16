@@ -8,6 +8,12 @@ import select
 import hashlib
 import urllib.request
 import re
+import requests
+try: 
+    from BeautifulSoup import BeautifulSoup
+except ImportError:
+    from bs4 import BeautifulSoup
+import xml.etree
 
 def split_ip(ip):
     return ip.split(':')
@@ -474,8 +480,14 @@ class Chord_Node:
         try:
             html = self.data[(hash,url)]
         except KeyError:
-            webUrl  = urllib.request.urlopen(url)
-            html = str(webUrl.read())#[2:-1]
+            # webUrl  = urllib.request.urlopen(url)
+            # html = str(webUrl.read())#[2:-1]
+            resp = requests.get(url)
+            data = resp.text
+            html = data#the HTML code you've written above
+            parsed_html = BeautifulSoup(html,features = "html.parser")  
+            # parsed_html = xml.etree.ElementTree.fromstring(html)          
+            html =str(parsed_html)
             self.insert_data((hash,url), html)
         
         self.s_rep.send_string(html)
