@@ -598,16 +598,8 @@ def main():
     
     args =parser.parse_args(params)
     args = vars(args)
-    # id = int(sys.argv[1])
-    # ip = sys.argv[2]
-    # m = int(sys.argv[3])
-    # entry = None
-    # if len(sys.argv) ==5:
-    #     entry = sys.argv[4]
-    
-    # n = Chord_Node(id,ip,m,entry)
     n = Chord_Node(args['id'],args['addr'],args['bits'], args['entry_addr'])
-    # n.run()
+    
 
 if __name__ == "__main__":
     main()

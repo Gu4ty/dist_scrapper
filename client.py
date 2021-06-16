@@ -9,6 +9,7 @@ import os
 import urllib
 import re
 import shutil
+import argparse
 
 from zmq.sugar.frame import Message
 
@@ -76,7 +77,7 @@ class Client:
                     shutil.rmtree(folder)
                     return self.TO_TEXT
         
-        # html = self.update_html(links,html)
+        html = self.update_html(links,html)
         file = open(f'./{folder}/base.html', 'x',encoding='utf8')
         file.write(html)
         file.close()
@@ -193,15 +194,20 @@ class Client:
                     break
 
 def main():
-    # client_ip = sys.argv[1]
-    client_ip = '127.0.0.1:5000'
+
+    params = sys.argv[1:]
+    parser = argparse.ArgumentParser(prog='PROG')
+    parser.add_argument('-my_addr', type=str) 
+    parser.add_argument('-entry_addr',type=str)
+    args =parser.parse_args(params)
+    args = vars(args)
     try:
         os.makedirs('Requests')
     except FileExistsError:
         pass
 
-    c = Client(client_ip)
-    c.run('127.0.0.1:6000')
+    c = Client(args['my_addr'])
+    c.run(args['entry_addr'])
 
 
 if __name__ == "__main__":
