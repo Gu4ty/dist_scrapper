@@ -154,7 +154,7 @@ class Client:
         return True
         
     def is_local_link(self,current_url,next_url):
-        return self.base_link(current_url) not in next_url
+        return self.base_link(current_url) in next_url
     
     def base_link(self,url):
         a= url.split('//',1)
