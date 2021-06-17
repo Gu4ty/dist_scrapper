@@ -6,6 +6,10 @@
 
 - **python 3**
 
+-**python requests**
+
+-**python bs4**
+
 ### Utilización
 
 **client.py**: La aplicación cliente. Recibe una url insertada por el usuario, además de una profundidad. El cliente scrappea la url con dicha profundidad haciéndole peticiones al servidor. Al terminar, creará unos directorios en la carpeta donde se encuentra el código que seguirá la misma estructura que los links en el código html de la url. 

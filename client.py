@@ -1,11 +1,7 @@
-from typing import Collection
+# from typing import Collection
 import zmq
 import sys
-import time
-import json
-import random
 import threading
-import select
 import os
 import urllib
 import re
