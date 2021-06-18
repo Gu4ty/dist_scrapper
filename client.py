@@ -193,7 +193,11 @@ class Client:
             url = url[1].split('/',1)
         except IndexError:
             pass
-        return f'{id}- {url[0]}'
+        
+        
+        url = url[0].replace(':', ' port ')
+        
+        return f'{id}- {url}'
     
     def update_id(self):
         folders_in_Requests = next(os.walk('./Requests'))[1]
