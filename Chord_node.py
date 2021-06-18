@@ -4,10 +4,7 @@ import time
 import json
 import random
 import threading
-import select
 import hashlib
-import urllib.request
-import re
 import requests
 from bs4 import BeautifulSoup
 import argparse

@@ -1,26 +1,29 @@
-from typing import Collection
+# from typing import Collection
 import zmq
 import sys
-import time
-import json
-import random
 import threading
-import select
 import os
 import urllib
 import re
 import shutil
 import argparse
 import collections
+import urllib.parse
 from zmq.sugar.frame import Message
 
 class Client:
     next_req_id = 1
+    scrap_archives = False
+    scrap_local = True
+
     LOC = 'locate'
     GET = 'get' 
     BR = 'bad request'
     BR_TEXT = 'Scrap could not be performed, url did not retrieve information. (Url might not be correct.)'
     TO_TEXT = 'Connection timed out.'
+
+
+    
 
     def __init__(self, client_ip):
         self.ip = client_ip
@@ -44,7 +47,7 @@ class Client:
     
     def send_request(self, ip_port, head,body):
         s_req = self.make_req_socket(ip_port)
-        s_req.setsockopt( zmq.RCVTIMEO, 45000 ) # milliseconds
+        # s_req.setsockopt( zmq.RCVTIMEO, 45000 ) # milliseconds
         s_req.send_string(head + " " + body)
         try:
             return s_req.recv_string() # response
@@ -72,8 +75,9 @@ class Client:
 
         links = self.get_hrefs(html)
         for key in links:
-            if links[key].find('http') == 0:
-                broken_request = self.scrap(req_addr,links[key],depth-1,folder,key)
+            link = urllib.parse.urljoin(url,links[key])
+            if self.acceptable_link(url,link): 
+                broken_request = self.scrap(req_addr,link,depth-1,folder,key)
                 if broken_request:
                     shutil.rmtree(folder)
                     return self.TO_TEXT
@@ -100,14 +104,15 @@ class Client:
         links = self.get_hrefs(html)
 
         for key in links:
-            if links[key].find('http') == 0:
-                broken_request = self.scrap(req_addr,links[key],depth-1,folder,key)
+            link = urllib.parse.urljoin(url,links[key])   
+            if self.acceptable_link(url,link):    
+                broken_request = self.scrap(req_addr,link,depth-1,folder,key)
                 if broken_request:
                     return True
 
         html = self.update_html(links,html)
        
-        extension = '.css' if url.endswith('.css') else '.html'
+        extension = self.is_not_file_link(url)[1]
         file = open(f'./{folder}/{folder_name}{extension}', 'x', encoding='utf8')
         file.write(html)
         file.close()
@@ -126,13 +131,48 @@ class Client:
 
         for i in range(len(keys)):
             link = links[keys[i]]
-            extension = '.css' if link.endswith('.css') else '.html'
+            extension =self.is_not_file_link(link)[1]
             index = keys[i]+len(link)
             if i+1 < len(keys):
                 aux.append(str(keys[i])+'/'+str(keys[i])+extension+html[index:keys[i+1]])
             else:
                 aux.append(str(keys[i])+'/'+str(keys[i])+extension+html[index:])
         return ''.join(aux)
+
+    def acceptable_link(self, current_url,next_url):
+        
+        if self.scrap_local and not self.is_local_link(current_url,next_url) :
+            return False
+            
+        if not self.scrap_archives and not self.is_not_file_link(next_url)[0]:
+            return False
+        
+        return True
+        
+    def is_local_link(self,current_url,next_url):
+        return self.base_link(current_url) in next_url
+    
+    def base_link(self,url):
+        a= url.split('//',1)
+        b= a[1].split('/')
+        return b[0].split('.',1)[1]
+
+
+    def is_not_file_link(self, url):
+        try:
+            aux = url.split('//')[1]
+        except:
+            return (True, '.html')
+
+        aux1 = aux.split('/')
+        if len(aux1)==1:
+            return (True, '.html')
+
+        a =aux.split('.')[-1]
+
+        if (len(a.split('/')) >1 ) or (len(a.split('?'))>1) or (a == 'html'):
+            return (True, '.html')        
+        return (False,f'.{a}')
 
     def get_hrefs(self,html):       
         indexes =[m.start() for m in re.finditer(' href=', html)]        
@@ -157,6 +197,7 @@ class Client:
     
     def update_id(self):
         folders_in_Requests = next(os.walk('./Requests'))[1]
+        folders_in_Requests = self.sort_folders(folders_in_Requests)
         if folders_in_Requests:
             for i in range(len(folders_in_Requests)-1,-1,-1):
                 try:
@@ -164,7 +205,15 @@ class Client:
                     break
                 except ValueError:
                     pass
-    
+    def sort_folders(self, directory):
+        direct = ['' for _ in range(len(directory))]
+        for el in directory:
+            try:
+                direct[int(el.split('-',1)[0])-1] = el
+            except ValueError:
+                pass
+        return direct
+
     def process_input(self):
         print("\033c")
         print("URL to scrap:")
@@ -211,6 +260,8 @@ def main():
         pass
 
     c = Client(args['my_addr'])
+    c.scrap_archives =False
+    c.scrap_local = True
     c.run(args['entry_addr'])
 
 

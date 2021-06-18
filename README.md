@@ -6,6 +6,11 @@
 
 - **python 3**
 
+
+- **python requests**
+
+- **python bs4**
+
 ### Utilización
 
 **client.py**: La aplicación cliente. Recibe una url insertada por el usuario, además de una profundidad. El cliente scrappea la url con dicha profundidad haciéndole peticiones al servidor. Al terminar, creará unos directorios en la carpeta donde se encuentra el código que seguirá la misma estructura que los links en el código html de la url. 
@@ -50,4 +55,9 @@ La implementación del Chord_node.py sigue las ideas ilustradas en el pseudocód
 - **Replicación**: Cuando un nodo se cae, sus datos asociados a sus keys no se pierden debido a que en anteriores momentos copió sus datos a los primeros `k` nodos de la lista de `r` sucesores.  Cada cierto tiempo cada nodo le envía los últimos datos almacenados para replicar a uno de los `k` primeros nodos en su lista de sucesores. Cuando un nodo `A` se va de la red,  su predecesor `B` se da cuenta . El nodo `B` busca en su lista de sucesores  quien es el próximo sucesor vivo `C`, y le envía una  lista que significa que `C` debe encargarse de los datos del nodo `A`. Los  datos del nodo `A` estarán replicados en el nodo `C`, el cual pasará a poseer dichos datos como suyos, incluso para su posterior replicación en sus nodos sucesores.
 
 #### Cliente:
+
+
+La implementación del client.py es la que nos permite la interacción con los nodos chord, la cual se realiza a través de una dirección IP de conocimiento previo por parte del cliente. Dado que los nodos chord solo transfieren un string que contiene un html, el procesamiento del Scrapper se realiza en este script. Aquí se le da estructura a la respuesta creando un árbol de directorios que va a representar el contendido escrapeado. Con la ayuda de algunos métodos que chequean que tipo de links hacerle scrap y que modifican los links del html; se logra así que se pueda navegar desde el html que representa la url que se provee, haciendo click en los repectivos links hasta que se hayan dado tantos clicks como profundidad se especifica a la hora de hacer el pedido. Por ejemplo, si se hace un pedido con profundidad 3, se podrá acceder a los link de la url que se provee, a los links de estas nuevas páginas y así respectivamente hasta que haya cambiado de página 3 veces; después de eso aparecerá un error.
+
+Esta "navegación" por llamarla de alguna forma, es posible por el uso de una función `update_html` que edita el código html que se recibe al hacerle el pedido a la url; cambiando los campos href por direcciones relativas que apuntan a direcciones del árbol de direcciones creado durante el procesamiento.
 
