@@ -45,9 +45,9 @@ class Client:
             return html
         return None
     
-    def send_request(self, ip_port, head,body):
+    def send_request(self, ip_port, head,body,):
         s_req = self.make_req_socket(ip_port)
-        s_req.setsockopt( zmq.RCVTIMEO, 3000 ) # milliseconds
+        s_req.setsockopt( zmq.RCVTIMEO, 30000 ) # milliseconds
         s_req.send_string(head + " " + body)
         try:
             return s_req.recv_string() # response
