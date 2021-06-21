@@ -23,11 +23,17 @@ El cliente solo conoce la dirección ip de un nodo de la red chord, el cual ser�
 
 Para ejecutar el archivo client.py es necesario pasarle la dirección ip y puerto donde el cliente se va a alojar y la dirección ip y puerto del sistema al cual va a contactarse.
 
-Ejemplo para un cliente:
+Ejemplo para uno o más clientes:
 
 ```
 python3 client.py -my_addr 127.0.0.1:5009 -entry_addr 127.0.0.1:5001
 ```
+
+```
+python3 client.py -my_addr 127.0.0.1:5011 -entry_addr 127.0.0.1:5001
+```
+
+
 
 Para ejecutar un nodo de Chord_node.py es necesario pasarle el ip y puerto en el cual el nodo va a alojarse, el id del nodo en la red de nodos chord y la cantidad de bits de la red de nodos chord. Un parámetro adicional es la dirección ip y puerto de un nodo ya existente en la red por el cual el nodo actual va a unirse, si no se especifica se asume que se creó una nueva red chord y solo existe el nodo actual. Además del puerto dado de manera externa al ejecutar el código, el nodo también reserva el próximo puerto (por ejemplo si se dedicó el puerto 5000 al nodo, este también reservará el puerto 5001). Un puerto es para recibir peticiones de tipo internas de la red, y otro es para recibir peticiones dedicadas a scrappear el contenido html de una url dada.
 
@@ -44,6 +50,17 @@ python3 Chord_node.py -id 1 -addr 127.0.0.1:5002 -bits 3 -entry_addr 127.0.0.1:5
 ```
 python3 Chord_node.py -id 3 -addr 127.0.0.1:5004 -bits 3 -entry_addr 127.0.0.1:5000
 ```
+
+### Ejemplo
+
+- Correr dos clientes y una red de nodos de tres nodos con 3 bits.
+
+- Cada cliente pedirá el html de la url `https://evea.uh.cu/` con profundiad `2`.
+
+- El tiempo total que se demoran los dos clientes es aproximadamente el mismo que el de un cliente. Esto es debido al uso de la cache en la red de nodos chord.
+
+- Interrumpir el proceso de un nodo, luego de otro, quedando la red con un solo nodo. En este caso, interrumpir el nodo con id 1, y luego el nodo con id 3. Queda el nodo con id 0 con la información de ambos nodos. El nodo 1 y 3 no pueden ser interrumpidos al mismo tiempo, porque solo se replica datos al nodo sucesor en la red. En caso de que se quiera interrumpir más de un nodo al mismo tiempo y continuos solo hay que cambiar un parámetro del código, el parámetro `k` (vea notas sobre funcionamiento).
+- Volver a pedir el html de la url y ver que sigue guardado en cache el html.
 
 ### Notas sobre funcionamiento
 
